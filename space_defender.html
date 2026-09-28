@@ -317,6 +317,15 @@
             padding: 2px 6px;
         }
 
+        .lb-list li .lb-name {
+            flex: 1;
+            text-align: left;
+            margin: 0 10px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
         .lb-list li.you {
             color: var(--primary);
             text-shadow: 0 0 8px var(--primary);
@@ -333,6 +342,53 @@
             color: #fff;
             margin: 20px 0;
             text-shadow: 0 0 10px #fff;
+        }
+
+        #name-entry {
+            display: none;
+            margin: 0 auto 10px;
+        }
+
+        #name-entry label {
+            display: block;
+            font-size: 1rem;
+            letter-spacing: 3px;
+            color: var(--primary);
+            margin-bottom: 8px;
+        }
+
+        #name-form {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        #name-input {
+            border: 2px solid var(--primary);
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            width: 200px;
+            max-width: 100%;
+            height: 48px;
+            padding: 0 12px;
+            color: #fff;
+            font-family: inherit;
+            font-size: 1.2rem;
+            text-align: center;
+            user-select: text;
+            -webkit-user-select: text;
+        }
+
+        #name-input:focus {
+            outline: none;
+            box-shadow: 0 0 12px var(--primary);
+        }
+
+        #name-form .action-btn {
+            margin-top: 0;
+            padding: 10px 24px;
         }
 
         /* Full-screen splash intro: whole image visible (contain), letterboxed with brand color */
@@ -783,6 +839,14 @@
                 Cat-astrophe!</h1>
             <p>Your ship took one asteroid too many. The Mewniverse needs you back out there!</p>
             <div id="final-score-display">Score: 0</div>
+            <div id="name-entry">
+                <label for="name-input">ENTER YOUR NAME</label>
+                <form id="name-form">
+                    <input type="text" id="name-input" maxlength="12" autocomplete="off" spellcheck="false"
+                        placeholder="Your name">
+                    <button type="submit" id="name-save-btn" class="action-btn">Save</button>
+                </form>
+            </div>
             <div id="gameover-leaderboard" class="leaderboard" style="display: none;">
                 <h3>TOP SCORES</h3>
                 <ol class="lb-list"></ol>
@@ -853,6 +917,7 @@
         let leaderboardDisplayCount = 5;
         let latestScores = [];
         let lastRank = -1;
+        let nameEntryPending = false; // Game-over score waiting for a name before it is saved
         let saveTimer = null;
 
         const random = (min, max) => Math.random() * (max - min) + min;
@@ -1126,12 +1191,12 @@
             }
         }
 
-        async function submitScore(s) {
+        async function submitScore(s, name) {
             try {
                 const res = await fetch('/api/score', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ score: s })
+                    body: JSON.stringify({ score: s, name: name })
                 });
                 if (!res.ok) throw new Error(res.status);
                 const data = await res.json();
@@ -1155,9 +1220,12 @@
                 if (i === highlightRank) li.classList.add('you');
                 const rank = document.createElement('span');
                 rank.innerText = `#${i + 1}`;
+                const name = document.createElement('span');
+                name.className = 'lb-name';
+                name.innerText = s.name;
                 const value = document.createElement('span');
-                value.innerText = s;
-                li.append(rank, value);
+                value.innerText = s.score;
+                li.append(rank, name, value);
                 list.appendChild(li);
             });
             containerEl.style.display = 'block';
@@ -1389,7 +1457,7 @@
                     }
                 }
 
-                if (isFist(activeHand.keypoints)) {
+                if (isFist(activeHand.keypoints) && !nameEntryPending) {
                     if (Date.now() - lastGestureTime > 1500) {
                         lastGestureTime = Date.now();
                         startGame();
@@ -2185,36 +2253,78 @@
             document.getElementById('game-over-title').innerText =
                 selectedCharacter === 'dog' ? 'Ruff Landing!' : 'Cat-astrophe!';
             gameOverScreen.style.display = 'block';
-
-            if (useMouseFallback) {
-                cameraPreview.style.display = 'none';
-                restartBtn.style.display = 'inline-block';
-                document.getElementById('game-over-gesture-msg').style.display = 'none';
-            } else {
-                cameraPreview.style.display = 'block';
-                restartBtn.style.display = 'none';
-                document.getElementById('game-over-gesture-msg').style.display = 'block';
-            }
+            cameraPreview.style.display = useMouseFallback ? 'none' : 'block';
 
             finalScoreElement.innerText = `Score: ${score}`;
-
-            // Submit the score and refresh both leaderboard panels (fire-and-forget;
-            // the game-over screen is already visible when the result lands).
             gameoverLeaderboard.style.display = 'none';
-            (async () => {
-                lastRank = -1;
-                if (score > 0) {
-                    await submitScore(score);
-                } else {
-                    await fetchLeaderboard();
-                }
-                renderLeaderboard(gameoverLeaderboard, latestScores, lastRank);
-                renderLeaderboard(startLeaderboard, latestScores);
-            })();
+            lastRank = -1;
+
+            if (score > 0 && serverAvailable) {
+                // Ask for a name first; the score is saved when the form is submitted.
+                nameEntryPending = true;
+                setRestartControlsVisible(false);
+                nameSaveBtn.disabled = false;
+                nameInput.value = loadSavedName();
+                nameEntry.style.display = 'block';
+                nameInput.focus();
+                nameInput.select();
+            } else {
+                nameEntryPending = false;
+                nameEntry.style.display = 'none';
+                setRestartControlsVisible(true);
+                fetchLeaderboard().then(refreshLeaderboards);
+            }
 
             createExplosion(player.x, player.y, gameColors.primary, 50);
             createExplosion(player.x, player.y, gameColors.secondary, 50);
         }
+
+        // --- GAME OVER NAME ENTRY ---
+        const nameEntry = document.getElementById('name-entry');
+        const nameForm = document.getElementById('name-form');
+        const nameInput = document.getElementById('name-input');
+        const nameSaveBtn = document.getElementById('name-save-btn');
+
+        function loadSavedName() {
+            try {
+                return localStorage.getItem('pilotName') || '';
+            } catch {
+                return '';
+            }
+        }
+
+        function rememberName(name) {
+            try {
+                localStorage.setItem('pilotName', name);
+            } catch { }
+        }
+
+        function setRestartControlsVisible(visible) {
+            restartBtn.style.display = visible && useMouseFallback ? 'inline-block' : 'none';
+            document.getElementById('game-over-gesture-msg').style.display =
+                visible && !useMouseFallback ? 'block' : 'none';
+        }
+
+        function refreshLeaderboards() {
+            renderLeaderboard(gameoverLeaderboard, latestScores, lastRank);
+            renderLeaderboard(startLeaderboard, latestScores);
+        }
+
+        nameForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!nameEntryPending) return;
+            nameSaveBtn.disabled = true;
+            const name = nameInput.value.trim().slice(0, 12);
+            if (name) rememberName(name);
+            nameInput.blur();
+
+            await submitScore(score, name);
+            nameEntryPending = false;
+            nameEntry.style.display = 'none';
+            lastGestureTime = Date.now(); // Don't restart from a fist made while typing
+            setRestartControlsVisible(true);
+            refreshLeaderboards();
+        });
 
         function gameLoop() {
             ctx.save();

@@ -17,6 +17,8 @@ const DEFAULT_SETTINGS = {
     leaderboardDisplayCount: 5
 };
 const MAX_STORED_SCORES = 100;
+const MAX_NAME_LENGTH = 12;
+const DEFAULT_NAME = 'Anonymous';
 
 const MIME = {
     '.html': 'text/html; charset=utf-8',
@@ -85,6 +87,24 @@ function sanitizeSettings(body, previous) {
     return s;
 }
 
+function sanitizeName(v) {
+    const name = typeof v === 'string'
+        ? v.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, MAX_NAME_LENGTH)
+        : '';
+    return name || DEFAULT_NAME;
+}
+
+// Leaderboard entries are { name, score }. Older files stored bare numbers;
+// upgrade those on read so they still show up (and get rewritten on next save).
+function readScores() {
+    const board = readJson(LEADERBOARD_FILE, { scores: [] });
+    if (!Array.isArray(board.scores)) return [];
+    return board.scores
+        .map(e => (typeof e === 'number' ? { name: DEFAULT_NAME, score: e } : e))
+        .filter(e => e && Number.isInteger(e.score))
+        .map(e => ({ name: sanitizeName(e.name), score: e.score }));
+}
+
 function serveStatic(res, urlPath) {
     const filePath = path.normalize(path.join(ROOT, decodeURIComponent(urlPath)));
     if (!filePath.startsWith(ROOT)) {
@@ -126,9 +146,7 @@ const server = http.createServer(async (req, res) => {
             return sendJson(res, 200, saved);
         }
         if (req.method === 'GET' && p === '/api/leaderboard') {
-            const board = readJson(LEADERBOARD_FILE, { scores: [] });
-            if (!Array.isArray(board.scores)) board.scores = [];
-            return sendJson(res, 200, { scores: board.scores });
+            return sendJson(res, 200, { scores: readScores() });
         }
         if (req.method === 'POST' && p === '/api/score') {
             let body;
@@ -141,13 +159,13 @@ const server = http.createServer(async (req, res) => {
             if (!Number.isInteger(score) || score <= 0) {
                 return sendJson(res, 400, { error: 'score must be a positive integer' });
             }
-            const board = readJson(LEADERBOARD_FILE, { scores: [] });
-            if (!Array.isArray(board.scores)) board.scores = [];
-            board.scores.push(score);
-            board.scores.sort((a, b) => b - a);
-            board.scores = board.scores.slice(0, MAX_STORED_SCORES);
-            writeJson(LEADERBOARD_FILE, board);
-            return sendJson(res, 200, { scores: board.scores, rank: board.scores.indexOf(score) });
+            const entry = { name: sanitizeName(body.name), score };
+            let scores = readScores();
+            scores.push(entry);
+            scores.sort((a, b) => b.score - a.score);
+            scores = scores.slice(0, MAX_STORED_SCORES);
+            writeJson(LEADERBOARD_FILE, { scores });
+            return sendJson(res, 200, { scores, rank: scores.indexOf(entry) });
         }
 
         return sendJson(res, 404, { error: 'not found' });
