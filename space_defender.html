@@ -337,6 +337,84 @@
             display: none;
         }
 
+        /* Full leaderboard + archive (opened from Settings) */
+        #leaderboard-screen {
+            display: none;
+            z-index: 50;
+        }
+
+        #leaderboard-screen .leaderboard {
+            max-width: 360px;
+            max-height: 38vh;
+            overflow-y: auto;
+        }
+
+        .lb-empty {
+            color: #9a8bb5;
+            padding: 6px 0;
+        }
+
+        .archive-box {
+            margin: 20px auto 10px;
+            padding: 12px 20px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            text-align: left;
+        }
+
+        .archive-box label {
+            display: block;
+            font-size: 1.1rem;
+            color: #fff;
+            margin-bottom: 4px;
+        }
+
+        .archive-box p {
+            font-size: 0.85rem;
+            margin-bottom: 10px;
+        }
+
+        #archive-form {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        #archive-name {
+            flex: 1;
+            min-width: 180px;
+            height: 44px;
+            padding: 0 12px;
+            border: 2px solid var(--primary);
+            border-radius: 8px;
+            background: transparent;
+            color: #fff;
+            font-family: inherit;
+            font-size: 1rem;
+            user-select: text;
+            -webkit-user-select: text;
+        }
+
+        #archive-form .action-btn {
+            margin-top: 0;
+            padding: 8px 20px;
+            font-size: 1rem;
+        }
+
+        #archive-status {
+            min-height: 1.2em;
+            margin-top: 8px;
+            font-size: 0.9rem;
+        }
+
+        #archive-status.error {
+            color: #ff6b6b;
+        }
+
+        #archive-status.ok {
+            color: var(--primary);
+        }
+
         #final-score-display {
             font-size: 2.5rem;
             color: #fff;
@@ -784,11 +862,34 @@
                 <input type="number" id="leaderboard-count" min="1" max="20" step="1" value="5">
             </div>
 
+            <button id="view-leaderboard-btn" class="action-btn">View Leaderboard</button>
+            <br>
             <button id="settings-close-btn" class="action-btn">Done</button>
             <br>
             <button id="settings-reset-btn" class="action-btn"
                 style="font-size: 0.9rem; padding: 10px 20px; border-color: #777; color: #fff; box-shadow: none;">Reset
                 Defaults</button>
+        </div>
+
+        <div id="leaderboard-screen" class="screen-panel">
+            <h2>Leaderboard</h2>
+            <div id="lb-full-count" style="color: #cdbfe3; margin-bottom: 6px;"></div>
+            <div id="full-leaderboard" class="leaderboard">
+                <ol class="lb-list"></ol>
+            </div>
+
+            <div class="archive-box">
+                <label for="archive-name">Archive &amp; Reset</label>
+                <p>Saves these scores to <b>leaderboard_archive.json</b> and clears the in-game leaderboard.
+                    Use a specific name with the <b>event name and date</b>, e.g. "Tech Expo Manila - Sep 28, 2026".</p>
+                <form id="archive-form">
+                    <input type="text" id="archive-name" maxlength="60" autocomplete="off" spellcheck="false">
+                    <button type="submit" id="archive-btn" class="action-btn">Archive</button>
+                </form>
+                <div id="archive-status"></div>
+            </div>
+
+            <button id="leaderboard-back-btn" class="action-btn">Back</button>
         </div>
 
         <div id="start-screen" class="screen-panel" style="display: flex;">
@@ -1208,6 +1309,20 @@
             }
         }
 
+        function makeLeaderboardRow(entry, index, highlight) {
+            const li = document.createElement('li');
+            if (highlight) li.classList.add('you');
+            const rank = document.createElement('span');
+            rank.innerText = `#${index + 1}`;
+            const name = document.createElement('span');
+            name.className = 'lb-name';
+            name.innerText = entry.name;
+            const value = document.createElement('span');
+            value.innerText = entry.score;
+            li.append(rank, name, value);
+            return li;
+        }
+
         function renderLeaderboard(containerEl, scores, highlightRank = -1) {
             if (!serverAvailable || scores.length === 0) {
                 containerEl.style.display = 'none';
@@ -1216,17 +1331,7 @@
             const list = containerEl.querySelector('.lb-list');
             list.innerHTML = '';
             scores.slice(0, leaderboardDisplayCount).forEach((s, i) => {
-                const li = document.createElement('li');
-                if (i === highlightRank) li.classList.add('you');
-                const rank = document.createElement('span');
-                rank.innerText = `#${i + 1}`;
-                const name = document.createElement('span');
-                name.className = 'lb-name';
-                name.innerText = s.name;
-                const value = document.createElement('span');
-                value.innerText = s.score;
-                li.append(rank, name, value);
-                list.appendChild(li);
+                list.appendChild(makeLeaderboardRow(s, i, i === highlightRank));
             });
             containerEl.style.display = 'block';
         }
@@ -1266,9 +1371,10 @@
 
         // Settings Open/Close Logic
         function toggleSettings() {
-            if (settingsScreen.style.display === 'block') {
-                // Close Settings
+            if (settingsScreen.style.display === 'block' || leaderboardScreen.style.display === 'block') {
+                // Close Settings (and the leaderboard panel opened from it)
                 settingsScreen.style.display = 'none';
+                leaderboardScreen.style.display = 'none';
 
                 // Return to original state
                 gameState = previousGameState;
@@ -1296,6 +1402,85 @@
 
         settingsBtn.addEventListener('click', toggleSettings);
         settingsCloseBtn.addEventListener('click', toggleSettings);
+
+        // --- FULL LEADERBOARD & ARCHIVE (from Settings) ---
+        const leaderboardScreen = document.getElementById('leaderboard-screen');
+        const fullLeaderboard = document.getElementById('full-leaderboard');
+        const archiveForm = document.getElementById('archive-form');
+        const archiveNameInput = document.getElementById('archive-name');
+        const archiveBtn = document.getElementById('archive-btn');
+        const archiveStatus = document.getElementById('archive-status');
+
+        function setArchiveStatus(text, kind) {
+            archiveStatus.innerText = text;
+            archiveStatus.className = kind || '';
+        }
+
+        function renderFullLeaderboard() {
+            const list = fullLeaderboard.querySelector('.lb-list');
+            list.innerHTML = '';
+            document.getElementById('lb-full-count').innerText = serverAvailable
+                ? `${latestScores.length} score${latestScores.length === 1 ? '' : 's'}`
+                : 'Leaderboard unavailable (server not running)';
+            if (latestScores.length === 0) {
+                const li = document.createElement('li');
+                li.className = 'lb-empty';
+                li.innerText = 'No scores yet';
+                list.appendChild(li);
+            }
+            latestScores.forEach((s, i) => list.appendChild(makeLeaderboardRow(s, i, false)));
+            archiveBtn.disabled = !serverAvailable || latestScores.length === 0;
+        }
+
+        document.getElementById('view-leaderboard-btn').addEventListener('click', async () => {
+            settingsScreen.style.display = 'none';
+            leaderboardScreen.style.display = 'block';
+            const today = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+            archiveNameInput.placeholder = `e.g. Tech Expo - ${today}`;
+            setArchiveStatus('');
+            await fetchLeaderboard();
+            renderFullLeaderboard();
+        });
+
+        document.getElementById('leaderboard-back-btn').addEventListener('click', () => {
+            leaderboardScreen.style.display = 'none';
+            settingsScreen.style.display = 'block';
+        });
+
+        archiveForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const name = archiveNameInput.value.trim();
+            if (!name) {
+                setArchiveStatus('Please enter an archive name (event name and date).', 'error');
+                archiveNameInput.focus();
+                return;
+            }
+            const noDate = /\d/.test(name) ? '' : 'This name has no date in it.\n\n';
+            if (!confirm(`${noDate}Archive ${latestScores.length} score(s) as "${name}" and reset the in-game leaderboard?`)) {
+                return;
+            }
+
+            archiveBtn.disabled = true;
+            try {
+                const res = await fetch('/api/leaderboard/archive', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || `Archive failed (${res.status})`);
+
+                latestScores = data.scores;
+                lastRank = -1;
+                archiveNameInput.value = '';
+                renderFullLeaderboard();
+                refreshLeaderboards();
+                setArchiveStatus(`Archived ${data.count} score(s) as "${data.name}". Leaderboard reset.`, 'ok');
+            } catch (err) {
+                setArchiveStatus(err.message, 'error');
+                archiveBtn.disabled = !serverAvailable || latestScores.length === 0;
+            }
+        });
 
         // --- TENSORFLOW.JS HAND TRACKING SETUP ---
         let detector;
@@ -2190,6 +2375,7 @@
             startScreen.style.display = 'none';
             gameOverScreen.style.display = 'none';
             settingsScreen.style.display = 'none';
+            leaderboardScreen.style.display = 'none';
             handCursor.style.display = 'none';
             hud.style.display = 'flex';
 

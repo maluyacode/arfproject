@@ -8,6 +8,7 @@ const ROOT = __dirname;
 const PORT = parseInt(process.argv[2], 10) || 3006;
 const SETTINGS_FILE = path.join(ROOT, 'settings.json');
 const LEADERBOARD_FILE = path.join(ROOT, 'leaderboard.json');
+const ARCHIVE_FILE = path.join(ROOT, 'leaderboard_archive.json');
 
 const DEFAULT_SETTINGS = {
     primaryColor: '#9ff2c4',
@@ -19,6 +20,7 @@ const DEFAULT_SETTINGS = {
 const MAX_STORED_SCORES = 100;
 const MAX_NAME_LENGTH = 12;
 const DEFAULT_NAME = 'Anonymous';
+const MAX_ARCHIVE_NAME_LENGTH = 60;
 
 const MIME = {
     '.html': 'text/html; charset=utf-8',
@@ -87,11 +89,19 @@ function sanitizeSettings(body, previous) {
     return s;
 }
 
-function sanitizeName(v) {
-    const name = typeof v === 'string'
-        ? v.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, MAX_NAME_LENGTH)
+function cleanText(v, maxLength) {
+    return typeof v === 'string'
+        ? v.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, maxLength)
         : '';
-    return name || DEFAULT_NAME;
+}
+
+function sanitizeName(v) {
+    return cleanText(v, MAX_NAME_LENGTH) || DEFAULT_NAME;
+}
+
+function readArchives() {
+    const file = readJson(ARCHIVE_FILE, { archives: [] });
+    return Array.isArray(file.archives) ? file.archives : [];
 }
 
 // Leaderboard entries are { name, score }. Older files stored bare numbers;
@@ -166,6 +176,33 @@ const server = http.createServer(async (req, res) => {
             scores = scores.slice(0, MAX_STORED_SCORES);
             writeJson(LEADERBOARD_FILE, { scores });
             return sendJson(res, 200, { scores, rank: scores.indexOf(entry) });
+        }
+
+        if (req.method === 'POST' && p === '/api/leaderboard/archive') {
+            let body;
+            try {
+                body = await readBody(req);
+            } catch (e) {
+                return sendJson(res, 400, { error: e.message });
+            }
+            const name = cleanText(body.name, MAX_ARCHIVE_NAME_LENGTH);
+            if (!name) {
+                return sendJson(res, 400, { error: 'Archive name is required' });
+            }
+            const scores = readScores();
+            if (scores.length === 0) {
+                return sendJson(res, 400, { error: 'The leaderboard is empty, nothing to archive' });
+            }
+            const archives = readArchives();
+            if (archives.some(a => typeof a.name === 'string' && a.name.toLowerCase() === name.toLowerCase())) {
+                return sendJson(res, 409, { error: `An archive named "${name}" already exists` });
+            }
+            const archive = { name, archivedAt: new Date().toISOString(), scores };
+            archives.push(archive);
+            // Save the archive before clearing, so a failed write never loses scores.
+            writeJson(ARCHIVE_FILE, { archives });
+            writeJson(LEADERBOARD_FILE, { scores: [] });
+            return sendJson(res, 200, { name, archivedAt: archive.archivedAt, count: scores.length, scores: [] });
         }
 
         return sendJson(res, 404, { error: 'not found' });
