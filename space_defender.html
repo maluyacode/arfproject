@@ -1018,11 +1018,12 @@
                 <ol class="lb-list"></ol>
             </div>
             <button id="restart-btn" class="action-btn"
-                style="border-color: var(--secondary); color: var(--secondary);">Play Again</button>
+                style="border-color: var(--secondary); color: var(--secondary);">Next Player</button>
             <div id="game-over-gesture-msg"
                 style="display: none; font-size: 1.5rem; color: var(--secondary); margin-top: 20px; font-weight: bold; animation: pulse 1.5s infinite;">
-                <svg class="hand-icon"><use href="#icon-hand-fist"/></svg> MAKE A FIST TO RESTART!
+                <svg class="hand-icon"><use href="#icon-hand-fist"/></svg> MAKE A FIST FOR NEXT PLAYER!
             </div>
+            <div id="return-countdown-msg" style="display: none; font-size: 0.9rem; color: #9a8bb5; margin-top: 10px;"></div>
         </div>
     </div>
 
@@ -1055,6 +1056,7 @@
         let score = 0;
         let frameCount = 0;
         let useMouseFallback = true;
+        let cameraFailed = false; // Set once getUserMedia fails, so later starts go straight to mouse mode
 
         // Input tracking
         let targetX = 0;
@@ -1656,6 +1658,7 @@
             errorMsg.innerText = "";
 
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                cameraFailed = true;
                 errorMsg.innerText = "Camera API blocked. Falling back to mouse.";
                 setTimeout(startGame, 3000);
                 return;
@@ -1691,6 +1694,7 @@
                 }
             } catch (err) {
                 console.warn("Camera error:", err);
+                cameraFailed = true;
                 errorMsg.innerText = `Camera Error: ${err.message}. Falling back to mouse.`;
                 startBtn.innerText = "Blast Off! (Mouse Mode)";
                 startBtn.disabled = false;
@@ -1788,7 +1792,8 @@
                 if (isFist(activeHand.keypoints) && !nameEntryPending) {
                     if (Date.now() - lastGestureTime > 1500) {
                         lastGestureTime = Date.now();
-                        startGame();
+                        if (gameState === 'GAMEOVER') returnToStartScreen();
+                        else startGame();
                     }
                 }
                 return; // Skip steering/charging logic when not playing
@@ -2514,6 +2519,7 @@
 
         function startGame() {
             initAudio(); // Required to unlock audio contexts across browsers
+            stopReturnCountdown();
 
             startScreen.style.display = 'none';
             gameOverScreen.style.display = 'none';
@@ -2602,6 +2608,7 @@
                 nameEntryPending = false;
                 nameEntry.style.display = 'none';
                 setRestartControlsVisible(true);
+                startReturnCountdown();
                 fetchLeaderboard().then(refreshLeaderboards);
             }
 
@@ -2654,7 +2661,57 @@
             lastGestureTime = Date.now(); // Don't restart from a fist made while typing
             setRestartControlsVisible(true);
             refreshLeaderboards();
+            startReturnCountdown();
         });
+
+        // --- BACK TO PILOT SELECT FOR THE NEXT PLAYER ---
+        const RETURN_TO_START_SECONDS = 8;
+        const returnCountdownMsg = document.getElementById('return-countdown-msg');
+        let returnTimer = null;
+
+        function stopReturnCountdown() {
+            clearInterval(returnTimer);
+            returnTimer = null;
+            returnCountdownMsg.style.display = 'none';
+        }
+
+        // Leave the final score and leaderboard up for a few seconds, then go back to
+        // character select. The fist gesture / Next Player button skip the wait.
+        function startReturnCountdown() {
+            stopReturnCountdown();
+            let n = RETURN_TO_START_SECONDS;
+            const show = () => { returnCountdownMsg.innerText = `Back to pilot select in ${n}...`; };
+            show();
+            returnCountdownMsg.style.display = 'block';
+            returnTimer = setInterval(() => {
+                if (gameState !== 'GAMEOVER') return; // Hold while settings are open
+                n--;
+                if (n > 0) show();
+                else returnToStartScreen();
+            }, 1000);
+        }
+
+        function returnToStartScreen() {
+            stopReturnCountdown();
+            gameState = 'START';
+            lastGestureTime = Date.now(); // A held fist shouldn't launch the next game straight away
+
+            gameOverScreen.style.display = 'none';
+            hud.style.display = 'none';
+            startScreen.style.display = 'flex';
+
+            // Clear the last round off the backdrop
+            player = null;
+            projectiles = [];
+            enemies = [];
+            enemyOrbs = [];
+            powerUps = [];
+            activeBlast = null;
+
+            selectCharacter('cat');
+            lastRank = -1;
+            renderLeaderboard(startLeaderboard, latestScores);
+        }
 
         function gameLoop() {
             ctx.save();
@@ -2769,13 +2826,13 @@
 
         startBtn.addEventListener('click', () => {
             initAudio();
-            enableCam();
+            if (cameraFailed) startGame(); // Don't re-prompt for a camera that already failed
+            else enableCam();
         });
 
         restartBtn.addEventListener('click', () => {
             initAudio();
-            if (video.srcObject) cameraPreview.style.display = "block";
-            startGame();
+            returnToStartScreen();
         });
 
         // --- INITIALIZATION ---
