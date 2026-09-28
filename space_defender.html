@@ -415,6 +415,56 @@
             color: var(--primary);
         }
 
+        #archives-screen {
+            display: none;
+            z-index: 50;
+        }
+
+        #archive-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            max-height: 50vh;
+            overflow-y: auto;
+            margin-bottom: 10px;
+        }
+
+        .archive-item {
+            display: block;
+            width: 100%;
+            text-align: left;
+            padding: 10px 16px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--primary);
+            border-radius: 8px;
+            color: #fff;
+            font-family: inherit;
+            font-size: 1.05rem;
+            cursor: pointer;
+            transition: background 0.2s ease;
+        }
+
+        .archive-item:hover {
+            background: rgba(255, 255, 255, 0.12);
+        }
+
+        .archive-item .archive-meta {
+            display: block;
+            font-size: 0.85rem;
+            color: #cdbfe3;
+        }
+
+        #archive-detail .leaderboard {
+            max-width: 360px;
+            max-height: 45vh;
+            overflow-y: auto;
+        }
+
+        #archive-detail-title {
+            font-size: 1.3rem;
+            color: #fff;
+        }
+
         #final-score-display {
             font-size: 2.5rem;
             color: #fff;
@@ -889,7 +939,22 @@
                 <div id="archive-status"></div>
             </div>
 
+            <button id="view-archives-btn" class="action-btn">View Archives</button>
+            <br>
             <button id="leaderboard-back-btn" class="action-btn">Back</button>
+        </div>
+
+        <div id="archives-screen" class="screen-panel">
+            <h2>Archives</h2>
+            <div id="archive-list"></div>
+            <div id="archive-detail" style="display: none;">
+                <div id="archive-detail-title"></div>
+                <div id="archive-detail-meta" style="color: #cdbfe3; margin-bottom: 6px;"></div>
+                <div class="leaderboard">
+                    <ol class="lb-list"></ol>
+                </div>
+            </div>
+            <button id="archives-back-btn" class="action-btn">Back</button>
         </div>
 
         <div id="start-screen" class="screen-panel" style="display: flex;">
@@ -1371,10 +1436,11 @@
 
         // Settings Open/Close Logic
         function toggleSettings() {
-            if (settingsScreen.style.display === 'block' || leaderboardScreen.style.display === 'block') {
-                // Close Settings (and the leaderboard panel opened from it)
+            if ([settingsScreen, leaderboardScreen, archivesScreen].some(el => el.style.display === 'block')) {
+                // Close Settings (and the leaderboard/archive panels opened from it)
                 settingsScreen.style.display = 'none';
                 leaderboardScreen.style.display = 'none';
+                archivesScreen.style.display = 'none';
 
                 // Return to original state
                 gameState = previousGameState;
@@ -1445,6 +1511,83 @@
         document.getElementById('leaderboard-back-btn').addEventListener('click', () => {
             leaderboardScreen.style.display = 'none';
             settingsScreen.style.display = 'block';
+        });
+
+        // --- ARCHIVE BROWSER ---
+        const archivesScreen = document.getElementById('archives-screen');
+        const archiveList = document.getElementById('archive-list');
+        const archiveDetail = document.getElementById('archive-detail');
+
+        function formatArchiveDate(iso) {
+            const d = new Date(iso);
+            return isNaN(d) ? '' : d.toLocaleString('en-US', {
+                month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit'
+            });
+        }
+
+        function showArchiveList(archives) {
+            archiveDetail.style.display = 'none';
+            archiveList.style.display = 'flex';
+            archiveList.innerHTML = '';
+            if (archives.length === 0) {
+                const empty = document.createElement('div');
+                empty.className = 'lb-empty';
+                empty.innerText = 'No archives yet';
+                archiveList.appendChild(empty);
+                return;
+            }
+            // Newest first
+            archives.slice().reverse().forEach(a => {
+                const item = document.createElement('button');
+                item.className = 'archive-item';
+                const title = document.createElement('span');
+                title.innerText = a.name;
+                const meta = document.createElement('span');
+                meta.className = 'archive-meta';
+                const count = Array.isArray(a.scores) ? a.scores.length : 0;
+                meta.innerText = `Archived ${formatArchiveDate(a.archivedAt)} · ${count} score${count === 1 ? '' : 's'}`;
+                item.append(title, meta);
+                item.addEventListener('click', () => showArchiveDetail(a));
+                archiveList.appendChild(item);
+            });
+        }
+
+        function showArchiveDetail(a) {
+            archiveList.style.display = 'none';
+            archiveDetail.style.display = 'block';
+            document.getElementById('archive-detail-title').innerText = a.name;
+            const scores = Array.isArray(a.scores) ? a.scores : [];
+            document.getElementById('archive-detail-meta').innerText =
+                `Archived ${formatArchiveDate(a.archivedAt)} · ${scores.length} score${scores.length === 1 ? '' : 's'}`;
+            const list = archiveDetail.querySelector('.lb-list');
+            list.innerHTML = '';
+            scores.forEach((s, i) => list.appendChild(makeLeaderboardRow(s, i, false)));
+            archivesScreen.scrollTop = 0;
+        }
+
+        document.getElementById('view-archives-btn').addEventListener('click', async () => {
+            leaderboardScreen.style.display = 'none';
+            archivesScreen.style.display = 'block';
+            archiveList.innerHTML = '';
+            archiveDetail.style.display = 'none';
+            try {
+                const res = await fetch('/api/leaderboard/archives');
+                if (!res.ok) throw new Error(res.status);
+                showArchiveList((await res.json()).archives);
+            } catch {
+                archiveList.innerHTML = '<div class="lb-empty">Archives unavailable (server not running)</div>';
+            }
+        });
+
+        // Back: from one archive to the list, from the list to the leaderboard panel.
+        document.getElementById('archives-back-btn').addEventListener('click', () => {
+            if (archiveDetail.style.display === 'block') {
+                archiveDetail.style.display = 'none';
+                archiveList.style.display = 'flex';
+            } else {
+                archivesScreen.style.display = 'none';
+                leaderboardScreen.style.display = 'block';
+            }
         });
 
         archiveForm.addEventListener('submit', async (e) => {
@@ -2376,6 +2519,7 @@
             gameOverScreen.style.display = 'none';
             settingsScreen.style.display = 'none';
             leaderboardScreen.style.display = 'none';
+            archivesScreen.style.display = 'none';
             handCursor.style.display = 'none';
             hud.style.display = 'flex';
 

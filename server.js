@@ -155,6 +155,9 @@ const server = http.createServer(async (req, res) => {
             writeJson(SETTINGS_FILE, saved);
             return sendJson(res, 200, saved);
         }
+        if (req.method === 'GET' && p === '/api/leaderboard/archives') {
+            return sendJson(res, 200, { archives: readArchives() });
+        }
         if (req.method === 'GET' && p === '/api/leaderboard') {
             return sendJson(res, 200, { scores: readScores() });
         }
